@@ -237,7 +237,7 @@ print("PASS 26: Note card decoupled DOM structure prevents backspace deletion an
 import subprocess
 ret = subprocess.run(["node", os.path.join(ext_dir, "test_deep_verification.js")], capture_output=True, text=True)
 assert ret.returncode == 0, f"test_deep_verification.js failed:\n{ret.stderr}\n{ret.stdout}"
-print("PASS 27: Deep behavioral verification suite (10 suites: data unpacking, scroll anchoring, undo isolation, boundary clamping, cascade prune, cross-page search, selection slicing, phrase router, pin mode, parallel outline) 100% passed.")
+print("PASS 27: Deep behavioral verification suite (12 suites: data unpacking, scroll anchoring, undo isolation, boundary clamping, cascade prune, cross-page search, selection slicing, phrase router, pin mode, parallel outline, batch undo/redo, count preservation) 100% passed.")
 
 # Test 28: P1-1 异步全文检索与跨页索引引擎契约校验
 assert "searchAllPagesAcrossDoc" in r_js_content, "reader.js must implement searchAllPagesAcrossDoc"

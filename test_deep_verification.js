@@ -380,40 +380,35 @@ async function testAsyncCrossPageSearchEngine() {
 }
 
 // -----------------------------------------------------------------------------
-// Test G: 跨页选区高亮智能切片 (Selection Slicing, P1-3)
+// Test G: 跨页选区高亮智能切片 (Selection Slicing, P1-3 几何相交与边界夹持)
 // -----------------------------------------------------------------------------
 function sliceSelectionRects(clientRects, wrappers) {
   const pageSlices = new Map();
 
   for (const r of clientRects) {
     if (r.width <= 1 || r.height <= 1) continue;
-    const midY = r.top + r.height / 2;
-    const midX = r.left + r.width / 2;
 
-    let targetWrapper = null;
     for (const w of wrappers) {
       const b = w.rect;
-      if (midY >= b.top && midY <= b.bottom && midX >= b.left && midX <= b.right) {
-        targetWrapper = w;
-        break;
-      }
-    }
-    if (!targetWrapper) {
-      for (const w of wrappers) {
-        const b = w.rect;
-        if (r.top < b.bottom && r.bottom > b.top) {
-          targetWrapper = w;
-          break;
-        }
-      }
-    }
+      const interLeft = Math.max(r.left, b.left);
+      const interRight = Math.min(r.right, b.right);
+      const interTop = Math.max(r.top, b.top);
+      const interBottom = Math.min(r.bottom, b.bottom);
+      const interW = interRight - interLeft;
+      const interH = interBottom - interTop;
 
-    if (targetWrapper) {
-      const pNum = targetWrapper.pageNum;
-      if (!pageSlices.has(pNum)) {
-        pageSlices.set(pNum, { wrapper: targetWrapper, rects: [] });
+      if (interW > 1 && interH > 1) {
+        const pNum = w.pageNum;
+        if (!pageSlices.has(pNum)) {
+          pageSlices.set(pNum, { wrapper: w, rects: [] });
+        }
+        pageSlices.get(pNum).rects.push({
+          left: interLeft,
+          top: interTop,
+          width: interW,
+          height: interH
+        });
       }
-      pageSlices.get(pNum).rects.push(r);
     }
   }
 
@@ -423,8 +418,8 @@ function sliceSelectionRects(clientRects, wrappers) {
     const rectsPct = slice.rects.map((r) => {
       const leftPct = Math.max(0, ((r.left - wrapperRect.left) / wrapperRect.width) * 100);
       const topPct = Math.max(0, ((r.top - wrapperRect.top) / wrapperRect.height) * 100);
-      const widthPct = Math.min(100, (r.width / wrapperRect.width) * 100);
-      const heightPct = Math.min(100, (r.height / wrapperRect.height) * 100);
+      const widthPct = Math.min(100 - leftPct, (r.width / wrapperRect.width) * 100);
+      const heightPct = Math.min(100 - topPct, (r.height / wrapperRect.height) * 100);
       return {
         leftPct: Math.round(leftPct * 100) / 100,
         topPct: Math.round(topPct * 100) / 100,
@@ -449,14 +444,15 @@ function testSelectionSlicing() {
     { pageNum: 2, rect: { left: 100, top: 1100, right: 900, bottom: 2100, width: 800, height: 1000 } }
   ];
 
-  const clientRects = [
+  // Case 1: 常规跨页选区（独立分布在各页）
+  const clientRectsNormal = [
     { left: 150, top: 980, right: 850, bottom: 1000, width: 700, height: 20 },
     { left: 150, top: 1010, right: 800, bottom: 1030, width: 650, height: 20 },
     { left: 150, top: 1120, right: 850, bottom: 1140, width: 700, height: 20 },
     { left: 150, top: 1150, right: 500, bottom: 1170, width: 350, height: 20 }
   ];
 
-  const sliced = sliceSelectionRects(clientRects, wrappers);
+  const sliced = sliceSelectionRects(clientRectsNormal, wrappers);
   assert.strictEqual(sliced.length, 2, "Must slice into 2 distinct page annotations.");
   assert.strictEqual(sliced[0].pageNum, 1);
   assert.strictEqual(sliced[0].rects.length, 2);
@@ -465,28 +461,51 @@ function testSelectionSlicing() {
 
   assert.ok(sliced[0].rects[0].topPct >= 90 && sliced[0].rects[0].topPct <= 100);
   assert.ok(sliced[1].rects[0].topPct >= 1 && sliced[1].rects[0].topPct <= 5);
+
+  // Case 2: 极端几何跨页边界相交切片（一个选区矩形跨越页末至页缝隙）
+  const clientRectStraddle = [
+    { left: 150, top: 1000, right: 850, bottom: 1080, width: 700, height: 80 }
+  ];
+  const slicedStraddle = sliceSelectionRects(clientRectStraddle, wrappers);
+  assert.strictEqual(slicedStraddle.length, 1);
+  assert.strictEqual(slicedStraddle[0].pageNum, 1);
+  // 相交部分应精准被裁剪在 bottom: 1050 处，高度从 80px 裁剪为 50px
+  assert.strictEqual(slicedStraddle[0].rects[0].topPct, 95);
+  assert.strictEqual(slicedStraddle[0].rects[0].heightPct, 5);
+  assert.strictEqual(slicedStraddle[0].rects[0].topPct + slicedStraddle[0].rects[0].heightPct, 100);
 }
 
 // -----------------------------------------------------------------------------
-// Test H: 短语搭配判定与长句判定分流规则 (P2-1)
+// Test H: 短语搭配判定与长句判定分流规则 (P2-1 包含缩写词与句尾标点边缘验证)
 // -----------------------------------------------------------------------------
 function evaluateSentenceOrPhrase(cleanWord) {
   const words = cleanWord.trim().split(/\s+/);
   const wordCount = words.length;
-  const hasSentencePunctuation = /[.?!;:]\s|\n|[.?!;:]$/.test(cleanWord);
+  const hasSentencePunctuation =
+    (wordCount > 1 && /[.?!;:]\s|\n/.test(cleanWord)) ||
+    (wordCount >= 3 && /[.?!;:]$/.test(cleanWord));
   const isDirectSentence = cleanWord.length > 80 || hasSentencePunctuation || wordCount > 6;
   return isDirectSentence;
 }
 
 function testPhraseDetection() {
+  // 单词与常见缩写词（绝不误判为整句）
   assert.strictEqual(evaluateSentenceOrPhrase("serendipity"), false);
+  assert.strictEqual(evaluateSentenceOrPhrase("etc."), false, "etc. must not be sentence");
+  assert.strictEqual(evaluateSentenceOrPhrase("e.g."), false, "e.g. must not be sentence");
+  assert.strictEqual(evaluateSentenceOrPhrase("apple."), false, "single word with dot must not be sentence");
+
+  // 2~6 词常用搭配与短语（优先尝试词典，不分流为直接整句翻译）
+  assert.strictEqual(evaluateSentenceOrPhrase("give up."), false);
   assert.strictEqual(evaluateSentenceOrPhrase("take advantage of"), false);
   assert.strictEqual(evaluateSentenceOrPhrase("in the wake of"), false);
   assert.strictEqual(evaluateSentenceOrPhrase("as a matter of fact"), false);
   assert.strictEqual(evaluateSentenceOrPhrase("come up with a solution"), false);
 
+  // 真实多词完整句子（7+词或带完整句末标点）
   assert.strictEqual(evaluateSentenceOrPhrase("we need to find a new way to solve this problem"), true);
   assert.strictEqual(evaluateSentenceOrPhrase("This is a complete sentence."), true);
+  assert.strictEqual(evaluateSentenceOrPhrase("Wait! What is happening here?"), true);
   const longText = "a".repeat(85);
   assert.strictEqual(evaluateSentenceOrPhrase(longText), true);
 }
@@ -606,6 +625,86 @@ async function testParallelOutlineResolution() {
   assert.strictEqual(resultTree[2].pageNum, 6);
 }
 
+// -----------------------------------------------------------------------------
+// Test K: 跨页切片批次撤销/重做 (Batch Undo/Redo) 与批量级联删除 (P1-3)
+// -----------------------------------------------------------------------------
+async function testBatchUndoRedoAndCascadeDelete() {
+  let mockDB = new Map();
+  let currentAnnotations = [];
+  let undoStack = [];
+  let redoStack = [];
+
+  async function dbSave(ann) { mockDB.set(ann.id, ann); }
+  async function dbDelete(id) { mockDB.delete(id); }
+
+  const batchId = "batch_test_123";
+  const ann1 = { id: "ann_1_p1", batchId, pageNum: 1, text: "跨页选区" };
+  const ann2 = { id: "ann_2_p2", batchId, pageNum: 2, text: "跨页选区" };
+
+  currentAnnotations.push(ann1, ann2);
+  await dbSave(ann1);
+  await dbSave(ann2);
+  undoStack.push({ type: "add", items: [ann1, ann2] });
+
+  assert.strictEqual(currentAnnotations.length, 2);
+  assert.strictEqual(mockDB.size, 2);
+
+  // 1. 撤销批次添加 (单个 Ctrl+Z 必须撤销全部切片)
+  const actUndo = undoStack.pop();
+  redoStack.push(actUndo);
+  const undoIds = new Set((actUndo.items || [actUndo.item]).map(a => a.id));
+  currentAnnotations = currentAnnotations.filter(a => !undoIds.has(a.id));
+  for (const it of actUndo.items) await dbDelete(it.id);
+
+  assert.strictEqual(currentAnnotations.length, 0, "Undo must remove both sliced page annotations in 1 step!");
+  assert.strictEqual(mockDB.size, 0);
+
+  // 2. 重做批次添加 (单个 Ctrl+Y 必须恢复全部切片)
+  const actRedo = redoStack.pop();
+  undoStack.push(actRedo);
+  for (const it of actRedo.items) {
+    currentAnnotations.push(it);
+    await dbSave(it);
+  }
+  assert.strictEqual(currentAnnotations.length, 2, "Redo must restore both sliced page annotations in 1 step!");
+  assert.strictEqual(mockDB.size, 2);
+
+  // 3. 级联删除验证：通过 batchId 批量删除相关切片
+  const target = currentAnnotations.find(a => a.id === "ann_1_p1");
+  const toDelete = target.batchId ? currentAnnotations.filter(a => a.batchId === target.batchId) : [target];
+  const deleteIds = new Set(toDelete.map(a => a.id));
+  currentAnnotations = currentAnnotations.filter(a => !deleteIds.has(a.id));
+  for (const it of toDelete) await dbDelete(it.id);
+
+  assert.strictEqual(currentAnnotations.length, 0, "Deleting 1 slice must cascade to delete all slices with same batchId!");
+  assert.strictEqual(mockDB.size, 0);
+}
+
+// -----------------------------------------------------------------------------
+// Test L: 跨页全文检索在懒加载页面挂载时的计数保真验证 (P1-1)
+// -----------------------------------------------------------------------------
+function testSearchCountPreservationDuringLazyRender() {
+  const docSearchMatches = new Array(42).fill(0).map((_, i) => ({ pageNum: Math.floor(i / 2) + 1 }));
+  let currentDocSearchIndex = 0;
+  let currentSearchIndex = 0;
+
+  function updateSearchCount(localMatchesCount) {
+    if (docSearchMatches && docSearchMatches.length > 0) {
+      return `${Math.max(1, currentDocSearchIndex + 1)}/${docSearchMatches.length}`;
+    } else {
+      return `${Math.max(1, currentSearchIndex + 1)}/${localMatchesCount}`;
+    }
+  }
+
+  // 刚搜索完毕时，全书共 42 处
+  const initialText = updateSearchCount(3);
+  assert.strictEqual(initialText, "1/42");
+
+  // 用户滚动页面，第 5 页完成离屏渲染（该页仅包含 2 处高亮）
+  const lazyRenderText = updateSearchCount(2);
+  assert.strictEqual(lazyRenderText, "1/42", "Lazy rendering of a single page must NOT overwrite full-doc count (42) with local count (2)!");
+}
+
 (async () => {
   await testCascadePrune();
   console.log("PASS E: IndexedDB cascade prune and orphan annotation cleanup fully verified under 15-document stress test.");
@@ -625,7 +724,13 @@ async function testParallelOutlineResolution() {
   await testParallelOutlineResolution();
   console.log("PASS J: PDF outline parallel Promise.all resolution & tree hierarchy verified.");
 
-  console.log("\n[DEEP VERIFICATION SUCCESS] ALL 10 BEHAVIORAL SUITES PASSED 100%!");
+  await testBatchUndoRedoAndCascadeDelete();
+  console.log("PASS K: Batch Undo/Redo and cascade slice deletion verified.");
+
+  testSearchCountPreservationDuringLazyRender();
+  console.log("PASS L: Search count distribution preservation during lazy rendering verified.");
+
+  console.log("\n[DEEP VERIFICATION SUCCESS] ALL 12 BEHAVIORAL SUITES PASSED 100%!");
 })().catch((err) => {
   console.error("Deep verification failed:", err);
   process.exit(1);

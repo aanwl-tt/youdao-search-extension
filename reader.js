@@ -3447,10 +3447,11 @@ async function exportAnnotatedPdf() {
   showToast("正在合并渲染并生成已标注文档...");
 
   // 纯前端无损矢量 PDF 导出升级 (基于 pdf-lib，保留原 PDF 矢量文字、目录大纲与高清晰度)
-  if (typeof PDFLib !== "undefined" && currentDocBuffer) {
+  const pdfLib = (typeof window !== "undefined" && window.PDFLib) || (typeof PDFLib !== "undefined" && PDFLib) || (typeof globalThis !== "undefined" && globalThis.PDFLib);
+  if (pdfLib && currentDocBuffer) {
     try {
       showToast("正在通过 pdf-lib 生成无损矢量标注文档...");
-      const { PDFDocument, rgb } = window.PDFLib;
+      const { PDFDocument, rgb } = pdfLib;
       const pdfDoc = await PDFDocument.load(currentDocBuffer.slice(0));
       const pages = pdfDoc.getPages();
 
@@ -3465,15 +3466,15 @@ async function exportAnnotatedPdf() {
           if (!ann.rects || !ann.rects.length) continue;
           const c = parseColorRgba(ann.color);
           for (const r of ann.rects) {
-            const rx = (r.leftPct / 100) * pWidth;
-            const rw = (r.widthPct / 100) * pWidth;
+            const rx = Math.max(0, (r.leftPct / 100) * pWidth);
+            const rw = Math.min(pWidth - rx, (r.widthPct / 100) * pWidth);
             const rh = (r.heightPct / 100) * pHeight;
-            const ry = pHeight - ((r.topPct + r.heightPct) / 100) * pHeight;
+            const ry = Math.max(0, pHeight - ((r.topPct + r.heightPct) / 100) * pHeight);
             page.drawRectangle({
               x: rx,
               y: ry,
               width: rw,
-              height: rh,
+              height: Math.min(rh, pHeight - ry),
               color: rgb(c.r, c.g, c.b),
               opacity: c.a !== undefined ? c.a : 0.35
             });
