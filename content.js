@@ -605,8 +605,10 @@
       </div>
     `;
 
-    // 定位卡片：根据传入坐标、浮标位置或居中定位显示
-    positionCard(customPoint);
+    // 定位卡片：未钉住或首次显示时根据坐标或浮标定位；已钉住且视见时保持固定位置
+    if (!isCardPinned || !cardElement.classList.contains("visible")) {
+      positionCard(customPoint);
+    }
     cardElement.classList.add("visible");
 
     // 异步查询有道词典 API

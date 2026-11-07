@@ -717,13 +717,20 @@ async function performUndo() {
   redoStack.push(action);
 
   if (action.type === "add") {
-    // 撤销添加：从当前集合与数据库中移除
-    currentAnnotations = currentAnnotations.filter((a) => a.id !== action.item.id);
-    await dbDeleteAnnotation(action.item.id);
+    // 撤销添加：从当前集合与数据库中移除（支持单条与跨页批次）
+    const items = action.items || (action.item ? [action.item] : []);
+    const ids = new Set(items.map((it) => it.id));
+    currentAnnotations = currentAnnotations.filter((a) => !ids.has(a.id));
+    for (const item of items) {
+      await dbDeleteAnnotation(item.id);
+    }
   } else if (action.type === "delete") {
-    // 撤销删除：重新添加回集合与数据库
-    currentAnnotations.push(action.item);
-    await dbSaveAnnotation(action.item);
+    // 撤销删除：重新添加回集合与数据库（支持单条与跨页批次）
+    const items = action.items || (action.item ? [action.item] : []);
+    for (const item of items) {
+      currentAnnotations.push(item);
+      await dbSaveAnnotation(item);
+    }
   } else if (action.type === "clear_page") {
     // 撤销整页清空：重新恢复一整页的标注
     for (const ann of action.items) {
@@ -746,13 +753,20 @@ async function performRedo() {
   undoStack.push(action);
 
   if (action.type === "add") {
-    // 重做添加：重新放回集合与数据库
-    currentAnnotations.push(action.item);
-    await dbSaveAnnotation(action.item);
+    // 重做添加：重新放回集合与数据库（支持单条与跨页批次）
+    const items = action.items || (action.item ? [action.item] : []);
+    for (const item of items) {
+      currentAnnotations.push(item);
+      await dbSaveAnnotation(item);
+    }
   } else if (action.type === "delete") {
-    // 重做删除：再次删除
-    currentAnnotations = currentAnnotations.filter((a) => a.id !== action.item.id);
-    await dbDeleteAnnotation(action.item.id);
+    // 重做删除：再次删除（支持单条与跨页批次）
+    const items = action.items || (action.item ? [action.item] : []);
+    const ids = new Set(items.map((it) => it.id));
+    currentAnnotations = currentAnnotations.filter((a) => !ids.has(a.id));
+    for (const item of items) {
+      await dbDeleteAnnotation(item.id);
+    }
   } else if (action.type === "clear_page") {
     // 重做整页清空：再次清空
     const ids = new Set(action.items.map((a) => a.id));
@@ -942,11 +956,18 @@ async function activateSearchMatch(index) {
     const match = docSearchMatches[index];
     const targetPage = match.pageNum;
 
-    // 若目标页面尚未被渲染（处于虚拟懒加载占位态），即时按需离屏渲染该页
     const targetWrapper = pageWrappers[targetPage - 1];
     if (targetWrapper) {
-      if (targetWrapper.dataset.rendered !== "true" && !targetWrapper.dataset.rendering) {
-        await renderSinglePage(targetPage, targetWrapper);
+      if (targetWrapper.dataset.rendered !== "true") {
+        if (!targetWrapper.dataset.rendering) {
+          await renderSinglePage(targetPage, targetWrapper);
+        } else {
+          let retries = 0;
+          while (targetWrapper.dataset.rendering && retries < 20) {
+            await new Promise((r) => setTimeout(r, 50));
+            retries++;
+          }
+        }
       }
       applySearchHighlightToPage(targetWrapper, match.keyword);
 
@@ -1184,6 +1205,7 @@ async function resolveDestinationPage(dest) {
 }
 
 async function renderOutlineItems(items, container) {
+  if (!items || !items.length) return;
   // 并发解析同级大纲项目的目标页码（避免多级大纲时的严格串行 for...of await）
   const resolvedItems = await Promise.all(
     items.map(async (item) => {
@@ -1194,6 +1216,8 @@ async function renderOutlineItems(items, container) {
       return { item, pageNum };
     })
   );
+
+  const childPromises = [];
 
   for (const { item, pageNum } of resolvedItems) {
     const li = document.createElement("li");
@@ -1242,11 +1266,15 @@ async function renderOutlineItems(items, container) {
     if (hasChildren) {
       const childUl = document.createElement("ul");
       childUl.className = "outline-children";
-      await renderOutlineItems(item.items, childUl);
       li.appendChild(childUl);
+      childPromises.push(renderOutlineItems(item.items, childUl));
     }
 
     container.appendChild(li);
+  }
+
+  if (childPromises.length > 0) {
+    await Promise.all(childPromises);
   }
 }
 
@@ -1367,8 +1395,9 @@ function renderNotebookUI(filterText = "") {
       const phoneticSpan = item.phonetic
         ? `<span class="note-item-phonetic">${escapeHtml(item.phonetic)}</span>`
         : "";
-      const isSingleWord = !wordText.includes(" ") || wordText.split(/\s+/).length <= 2;
-      const audioBtn = isSingleWord
+      const words = wordText.trim().split(/\s+/);
+      const isWordOrPhrase = words.length <= 6 && wordText.length <= 60 && !/[.?!;:]\s/.test(wordText);
+      const audioBtn = isWordOrPhrase
         ? `<div class="note-item-audio-group">
             <button type="button" class="note-item-audio-btn note-audio-uk" data-word="${escapeHtml(wordText)}" data-type="1" title="英音发音 🇬🇧 (UK)">🇬🇧 英</button>
             <button type="button" class="note-item-audio-btn note-audio-us" data-word="${escapeHtml(wordText)}" data-type="2" title="美音发音 🇺🇸 (US)">🇺🇸 美</button>
@@ -2464,8 +2493,12 @@ function applySearchHighlightToPage(wrapper, keyword) {
   });
 
   searchMatches = Array.from(document.querySelectorAll(".search-highlight"));
-  if (searchCount && searchMatches.length > 0) {
-    searchCount.textContent = `${Math.max(1, currentSearchIndex + 1)}/${searchMatches.length}`;
+  if (searchCount) {
+    if (docSearchMatches && docSearchMatches.length > 0) {
+      searchCount.textContent = `${Math.max(1, currentDocSearchIndex + 1)}/${docSearchMatches.length}`;
+    } else if (searchMatches.length > 0) {
+      searchCount.textContent = `${Math.max(1, currentSearchIndex + 1)}/${searchMatches.length}`;
+    }
   }
 }
 
@@ -3190,43 +3223,42 @@ async function applyHighlight(color) {
   const wrappers = Array.from(document.querySelectorAll(".pdf-page-wrapper"));
   if (!wrappers.length) return;
 
-  // 收集并切片归类属于不同页面的 Range 矩形
+  // 收集并几何切片归类属于不同页面的 Range 矩形
   const pageSlices = new Map(); // pageNum -> { wrapper, rects: [] }
 
   for (const r of clientRects) {
     if (r.width <= 1 || r.height <= 1) continue;
-    const midY = r.top + r.height / 2;
-    const midX = r.left + r.width / 2;
 
-    let targetWrapper = null;
     for (const w of wrappers) {
       const b = w.getBoundingClientRect();
-      if (midY >= b.top && midY <= b.bottom && midX >= b.left && midX <= b.right) {
-        targetWrapper = w;
-        break;
-      }
-    }
+      const interLeft = Math.max(r.left, b.left);
+      const interRight = Math.min(r.right, b.right);
+      const interTop = Math.max(r.top, b.top);
+      const interBottom = Math.min(r.bottom, b.bottom);
+      const interW = interRight - interLeft;
+      const interH = interBottom - interTop;
 
-    if (!targetWrapper) {
-      for (const w of wrappers) {
-        const b = w.getBoundingClientRect();
-        if (r.top < b.bottom && r.bottom > b.top) {
-          targetWrapper = w;
-          break;
+      if (interW > 1 && interH > 1) {
+        const pNum = parseInt(w.dataset.pageNum, 10);
+        if (pNum) {
+          if (!pageSlices.has(pNum)) {
+            pageSlices.set(pNum, { wrapper: w, rects: [] });
+          }
+          pageSlices.get(pNum).rects.push({
+            left: interLeft,
+            top: interTop,
+            width: interW,
+            height: interH
+          });
         }
       }
-    }
-
-    if (targetWrapper && targetWrapper.dataset.pageNum) {
-      const pNum = parseInt(targetWrapper.dataset.pageNum, 10);
-      if (!pageSlices.has(pNum)) {
-        pageSlices.set(pNum, { wrapper: targetWrapper, rects: [] });
-      }
-      pageSlices.get(pNum).rects.push(r);
     }
   }
 
   if (pageSlices.size === 0) return;
+
+  const batchId = "batch_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6);
+  const createdAnnotations = [];
 
   for (const [pageNum, slice] of pageSlices.entries()) {
     const wrapperRect = slice.wrapper.getBoundingClientRect();
@@ -3234,8 +3266,8 @@ async function applyHighlight(color) {
       .map((r) => {
         const leftPct = Math.max(0, ((r.left - wrapperRect.left) / wrapperRect.width) * 100);
         const topPct = Math.max(0, ((r.top - wrapperRect.top) / wrapperRect.height) * 100);
-        const widthPct = Math.min(100, (r.width / wrapperRect.width) * 100);
-        const heightPct = Math.min(100, (r.height / wrapperRect.height) * 100);
+        const widthPct = Math.min(100 - leftPct, (r.width / wrapperRect.width) * 100);
+        const heightPct = Math.min(100 - topPct, (r.height / wrapperRect.height) * 100);
         return {
           leftPct: Math.round(leftPct * 100) / 100,
           topPct: Math.round(topPct * 100) / 100,
@@ -3249,6 +3281,7 @@ async function applyHighlight(color) {
 
     const newAnn = {
       id: "ann_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6) + "_p" + pageNum,
+      batchId: batchId,
       type: "highlight",
       pdfKey: currentDocKey,
       pageNum: pageNum,
@@ -3259,13 +3292,17 @@ async function applyHighlight(color) {
     };
 
     currentAnnotations.push(newAnn);
+    createdAnnotations.push(newAnn);
     await dbSaveAnnotation(newAnn);
-    recordUndoAction({ type: "add", item: newAnn });
 
     const hlLayer = slice.wrapper.querySelector(".highlight-layer");
     if (hlLayer) {
       renderPageHighlights(pageNum, hlLayer);
     }
+  }
+
+  if (createdAnnotations.length > 0) {
+    recordUndoAction({ type: "add", items: createdAnnotations });
   }
 
   updateAnnotationsUI();
@@ -3275,12 +3312,19 @@ async function applyHighlight(color) {
 
 async function deleteAnnotationById(id) {
   const target = currentAnnotations.find((a) => a.id === id);
-  if (target) {
-    recordUndoAction({ type: "delete", item: target });
-  }
+  if (!target) return;
 
-  currentAnnotations = currentAnnotations.filter((a) => a.id !== id);
-  await dbDeleteAnnotation(id);
+  const toDelete = target.batchId
+    ? currentAnnotations.filter((a) => a.batchId === target.batchId)
+    : [target];
+
+  recordUndoAction({ type: "delete", items: toDelete });
+
+  const deleteIds = new Set(toDelete.map((a) => a.id));
+  currentAnnotations = currentAnnotations.filter((a) => !deleteIds.has(a.id));
+  for (const ann of toDelete) {
+    await dbDeleteAnnotation(ann.id);
+  }
 
   document.querySelectorAll(".pdf-page-wrapper").forEach((wrapper) => {
     const pageNum = parseInt(wrapper.dataset.pageNum, 10);

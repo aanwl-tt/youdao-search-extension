@@ -97,7 +97,10 @@ async function queryYoudaoDefinition(word) {
   // 放宽短语/多词搭配判定（4~6 词常用搭配优先尝试词典/短语库查询，避免直接被当成整句跳过四六级与权威词典释义）
   const words = cleanWord.trim().split(/\s+/);
   const wordCount = words.length;
-  const hasSentencePunctuation = /[.?!;:]\s|\n|[.?!;:]$/.test(cleanWord);
+  // 仅对多词句子判定标点断句，避免缩写词（如 etc. / e.g. / i.e.）或单词带句点被误判为整句而跳过词典
+  const hasSentencePunctuation =
+    (wordCount > 1 && /[.?!;:]\s|\n/.test(cleanWord)) ||
+    (wordCount >= 3 && /[.?!;:]$/.test(cleanWord));
   const isDirectSentence = cleanWord.length > 80 || hasSentencePunctuation || wordCount > 6;
   const isSentence = isDirectSentence;
 
