@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>有道划词搜索插件 - 本地测试页</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+      max-width: 800px;
+      margin: 40px auto;
+      padding: 0 20px;
+      line-height: 1.8;
+      color: #333;
+      background-color: #f7f9fa;
+    }
+    .card {
+      background: #fff;
+      padding: 24px;
+      border-radius: 12px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+      margin-bottom: 24px;
+    }
+    h1 {
+      color: #e53935;
+      font-size: 24px;
+      margin-bottom: 8px;
+    }
+    .badge {
+      display: inline-block;
+      background: #e8f5e9;
+      color: #2e7d32;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 13px;
+      font-weight: bold;
+      margin-bottom: 16px;
+    }
+    p {
+      margin-bottom: 14px;
+    }
+    .sample-text {
+      background: #f1f3f4;
+      padding: 14px 18px;
+      border-left: 4px solid #e53935;
+      border-radius: 4px;
+      font-size: 16px;
+    }
+    .instructions {
+      background: #fff3e0;
+      padding: 16px;
+      border-radius: 8px;
+      font-size: 14px;
+      color: #e65100;
+    }
+    ol {
+      margin-left: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>有道划词搜索 - 功能测试页</h1>
+    <span class="badge">Edge 插件测试环境</span>
+    <p>在这个页面上，你可以测试插件的两种查词模式：</p>
+    
+    <div class="instructions">
+      <strong>测试方法：</strong>
+      <ol>
+        <li><strong>方式 1（划词悬浮按钮）</strong>：用鼠标划选下方样例段落中的任意英文单词（如 <code>serendipity</code> 或 <code>architecture</code>），鼠标松开后右上角会出现<strong>红色“有道”按钮</strong>，点击即可直达。</li>
+        <li><strong>方式 2（右键菜单）</strong>：用鼠标划选单词后，直接<strong>点击鼠标右键</strong>，选择 <strong>“在有道词典中搜索...”</strong>。</li>
+        <li><strong>方式 3（插件图标）</strong>：点击 Edge 浏览器右上角扩展栏的图标，可以在弹窗中输入单词直接搜索，也可随时关闭/开启划词按钮。</li>
+      </ol>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>英文测试段落</h2>
+    <div class="sample-text">
+      The beauty of software engineering lies in continuous improvement. Sometimes, discovering an unexpected solution brings true <strong>serendipity</strong>. Developing responsive, performant, and resilient browser extensions requires attention to both DOM isolation and asynchronous event coordination.
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>中文与多语测试段落</h2>
+    <div class="sample-text">
+      人工智能与现代浏览器技术的深度融合，为多语言知识检索带来了前所未有的便捷性。词典工具不仅能帮助我们扫清语言障碍，更是探索跨文化语境与专业领域知识的有力阶梯。
+    </div>
+  </div>
+</body>
+</html>

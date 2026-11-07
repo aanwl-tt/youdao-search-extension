@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>有道 PDF 沉浸式阅读器</title>
+  <link rel="stylesheet" href="lib/pdfjs/pdf_viewer.css">
+  <link rel="stylesheet" href="reader.css">
+</head>
+<body>
+  <!-- 顶部控制栏 -->
+  <header class="reader-toolbar">
+    <div class="toolbar-left">
+      <div class="brand">
+        <img src="icons/icon48.png" alt="logo" class="brand-logo">
+        <span class="brand-title">有道 PDF 阅读器</span>
+      </div>
+      <label class="btn btn-primary file-picker-label">
+        📂 打开本地 PDF
+        <input type="file" id="file-input" accept="application/pdf" style="display: none;">
+      </label>
+      <div class="recent-dropdown-wrapper" id="recent-dropdown-wrapper">
+        <button class="tool-btn btn-text" id="btn-recent-toggle" title="查看最近打开的本地文档">📚 最近文档 ▾</button>
+        <div class="recent-dropdown-menu" id="recent-dropdown-menu" style="display: none;">
+          <div class="recent-menu-header">最近打开的 PDF</div>
+          <div class="recent-menu-list" id="recent-menu-list">
+            <div class="recent-empty-hint">暂无最近阅读记录</div>
+          </div>
+        </div>
+      </div>
+      <button class="tool-btn btn-text" id="btn-outline-toggle" title="查看 PDF 目录大纲">📑 目录 <span class="badge-count" id="outline-count" style="display: none;">0</span></button>
+      <span class="file-name" id="doc-title">未打开文件</span>
+    </div>
+
+    <div class="toolbar-center">
+      <!-- 搜索快捷呼出 -->
+      <button class="tool-btn" id="btn-search-toggle" title="在文档中查找 (Ctrl+F)">
+        <svg class="tool-svg" viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+      </button>
+
+      <!-- 标注回退与恢复 (Undo / Redo) -->
+      <button class="tool-btn" id="btn-undo" title="撤销标注 (Ctrl+Z)" disabled>
+        <svg class="tool-svg" viewBox="0 0 24 24"><path d="M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z"/></svg>
+      </button>
+      <button class="tool-btn" id="btn-redo" title="重做标注 (Ctrl+Y)" disabled>
+        <svg class="tool-svg" viewBox="0 0 24 24"><path d="M18.4 10.6C16.55 8.99 14.15 8 11.5 8c-4.65 0-8.58 3.03-9.96 7.22L3.9 16c1.05-3.19 4.05-5.5 7.6-5.5 1.95 0 3.73.72 5.12 1.88L13 16h9V7l-3.6 3.6z"/></svg>
+      </button>
+
+      <div class="toolbar-divider"></div>
+
+      <!-- 模式与修改工具组 (Edge 原生风格) -->
+      <div class="annotation-tools-group">
+        <!-- 光标/查词模式 -->
+        <button class="tool-btn active" id="tool-cursor" title="光标模式：选词/划句查看有道释义">
+          <svg class="tool-svg" viewBox="0 0 24 24"><path d="M7 2l12 11.2-5.8.5 3.3 7.3-2.2 1-3.2-7.4L7 18V2z"/></svg>
+        </button>
+
+        <!-- 一键添加生词/短语笔记 (替换高亮笔) -->
+        <button class="tool-btn btn-with-text" id="tool-add-note" title="一键添加到生词与语句笔记本 (选中文本后点击添加，未选中时打开笔记本)">
+          <svg class="tool-svg" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-2 10h-4v4h-2v-4H7v-2h4V7h2v4h4v2z"/></svg>
+          <span class="tool-text-label">加笔记</span>
+        </button>
+
+        <!-- 绘制 / 手写笔 (Edge 30色 + 粗细滑动条) -->
+        <div class="tool-dropdown-wrapper">
+          <button class="tool-btn btn-with-text" id="tool-pen" title="绘制：在 PDF 任意位置画线、圈注与手写">
+            <svg class="tool-svg" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+            <span class="tool-text-label">绘制</span>
+            <span class="dropdown-caret">▾</span>
+          </button>
+          <div class="tool-popover-menu edge-popover-menu" id="pen-menu" style="display: none;">
+            <div class="menu-label">颜色</div>
+            <div class="edge-palette-grid" id="pen-palette-grid"></div>
+            <div class="edge-preview-wrapper">
+              <svg class="wavy-preview-svg" viewBox="0 0 240 32">
+                <path id="pen-wavy-preview" d="M 10 16 Q 65 2, 120 16 T 230 16" fill="none" stroke="#004de6" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+            </div>
+            <div class="menu-label" style="margin-top: 4px;">粗细</div>
+            <div class="edge-slider-wrapper">
+              <input type="range" class="edge-range-slider" id="pen-size-slider" min="1" max="15" step="0.5" value="2">
+              <div class="slider-labels">
+                <span>细</span>
+                <span id="pen-size-label">2.0px</span>
+                <span>粗</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 方框标注 [▢] (Edge 30色 + 粗细滑动条) -->
+        <div class="tool-dropdown-wrapper">
+          <button class="tool-btn" id="tool-rect" title="方框标注：在页面拖拽绘制矩形框">
+            <svg class="tool-svg" viewBox="0 0 24 24"><path d="M3 3v18h18V3H3zm16 16H5V5h14v14z"/></svg>
+            <span class="dropdown-caret">▾</span>
+          </button>
+          <div class="tool-popover-menu edge-popover-menu" id="rect-menu" style="display: none;">
+            <div class="menu-label">方框颜色</div>
+            <div class="edge-palette-grid" id="rect-palette-grid"></div>
+            <div class="edge-preview-wrapper">
+              <svg class="wavy-preview-svg" viewBox="0 0 240 32">
+                <rect id="rect-wavy-preview" x="20" y="6" width="200" height="20" fill="none" stroke="#e61b1b" stroke-width="2" rx="2"/>
+              </svg>
+            </div>
+            <div class="menu-label" style="margin-top: 4px;">线条粗细</div>
+            <div class="edge-slider-wrapper">
+              <input type="range" class="edge-range-slider" id="rect-size-slider" min="1" max="12" step="0.5" value="2">
+              <div class="slider-labels">
+                <span>细</span>
+                <span id="rect-size-label">2.0px</span>
+                <span>粗</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 橡皮擦 (双模式下拉：整笔擦除 / 区域擦除) -->
+        <div class="tool-dropdown-wrapper">
+          <button class="tool-btn" id="tool-eraser" title="橡皮擦：整笔擦除或滑动区域擦除">
+            <svg class="tool-svg" viewBox="0 0 24 24"><path d="M15.14 3c-.4 0-.8.15-1.11.45L2.45 15.03c-.6.6-.6 1.58 0 2.18L6.79 21.56c.3.3.71.44 1.11.44h9.1v-2h-7.7l-4.14-4.14 10.6-10.6 4.24 4.24-2.12 2.12 1.41 1.41 3.53-3.53c.6-.6.6-1.58 0-2.18l-4.24-4.24c-.3-.3-.7-.48-1.14-.48z"/></svg>
+            <span class="dropdown-caret">▾</span>
+          </button>
+          <div class="tool-popover-menu" id="eraser-menu" style="display: none; min-width: 170px;">
+            <div class="menu-label">擦除模式</div>
+            <button type="button" class="menu-item-btn active" id="btn-eraser-mode-stroke">
+              <span class="menu-item-title">✏️ 整笔擦除</span>
+              <span class="menu-item-desc">点击整条笔画/方框直接删除</span>
+            </button>
+            <button type="button" class="menu-item-btn" id="btn-eraser-mode-area">
+              <span class="menu-item-title">🧹 区域擦除</span>
+              <span class="menu-item-desc">按住鼠标滑动擦除相交笔迹</span>
+            </button>
+            <div class="menu-divider"></div>
+            <button type="button" class="menu-item-btn menu-danger-btn" id="btn-eraser-clear-page">
+              <span class="menu-item-title">🗑️ 清空本页笔迹</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 添加文本 [T] -->
+        <button class="tool-btn" id="tool-text" title="添加文本：在页面任意位置点击输入批注笔记">
+          <svg class="tool-svg" viewBox="0 0 24 24"><path d="M5 4v3h5.5v12h3V7H19V4H5z"/></svg>
+        </button>
+      </div>
+
+      <div class="toolbar-divider"></div>
+
+      <!-- 翻页控制 -->
+      <button class="tool-btn" id="btn-prev" title="上一页 (Page Up)">‹</button>
+      <span class="page-indicator">
+        <input type="number" id="page-num-input" min="1" value="1"> / <span id="page-count">0</span>
+      </span>
+      <button class="tool-btn" id="btn-next" title="下一页 (Page Down)">›</button>
+    </div>
+
+    <div class="toolbar-right">
+      <button class="tool-btn" id="btn-zoom-out" title="缩小 (-)">−</button>
+      <span class="zoom-level" id="zoom-text">100%</span>
+      <button class="tool-btn" id="btn-zoom-in" title="放大 (+)">+</button>
+      <button class="tool-btn btn-text" id="btn-zoom-fit" title="自适应宽度">自适应</button>
+      <button class="tool-btn btn-text active" id="btn-text-enhance" title="Edge 风格文本对比度与清晰度增强 (已开启)">
+        <svg class="tool-svg" viewBox="0 0 24 24"><path d="M9.93 13.5h4.14L12 7.98 9.93 13.5zM20 2H4c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-4.05 16.5l-1.14-3H9.17l-1.12 3H5.96l5.11-13h1.86l5.11 13h-2.09z"/></svg>
+        <span>清晰度增强</span>
+      </button>
+      <div class="tool-dropdown-wrapper">
+        <button class="tool-btn btn-text" id="btn-theme-toggle" title="切换阅读主题（浅色 / 羊皮纸护眼 / 夜间暗黑）">
+          <span id="theme-icon">☀️</span>
+          <span id="theme-label">浅色</span>
+          <span class="dropdown-caret">▾</span>
+        </button>
+        <div class="tool-popover-menu" id="theme-menu" style="display: none; min-width: 130px;">
+          <div class="menu-label">阅读主题</div>
+          <button type="button" class="menu-item-btn active" id="btn-theme-light">
+            <span class="menu-item-title">☀️ 默认浅色</span>
+          </button>
+          <button type="button" class="menu-item-btn" id="btn-theme-sepia">
+            <span class="menu-item-title">📜 羊皮纸护眼</span>
+          </button>
+          <button type="button" class="menu-item-btn" id="btn-theme-dark">
+            <span class="menu-item-title">🌙 夜间暗黑</span>
+          </button>
+        </div>
+      </div>
+      <div class="toolbar-divider"></div>
+      <button class="tool-btn btn-text" id="btn-save-pdf" title="保存/导出已修改的 PDF 文件">
+        <svg class="tool-svg" viewBox="0 0 24 24"><path d="M17 3H5c-1.11 0-2 .9-2 2v14c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm3-10H5V5h10v4z"/></svg>
+        <span>保存</span>
+      </button>
+      <button class="tool-btn btn-text" id="btn-notebook-toggle" title="查看生词与语句笔记本 (全局持久化，可导出 .md)">
+        <svg class="tool-svg" viewBox="0 0 24 24"><path d="M18 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 4h5v8l-2.5-1.5L6 12V4z"/></svg>
+        <span>笔记本</span>
+        <span class="badge-count" id="notebook-count">0</span>
+      </button>
+      <button class="tool-btn btn-text btn-highlight-toggle" id="btn-annotations-toggle" title="查看所有标注大纲">
+        <svg class="tool-svg" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+        <span>标注</span>
+        <span class="badge-count" id="annotations-count">0</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- PDF 页面全文搜索浮层 (Ctrl+F) -->
+  <div class="search-bar" id="search-bar" style="display: none;">
+    <svg class="search-icon" viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+    <input type="text" id="search-input" placeholder="在文档中查找..." autocomplete="off">
+    <span class="search-count" id="search-count">0/0</span>
+    <button class="search-nav-btn" id="btn-search-prev" title="查找上一个 (Shift+Enter)">‹</button>
+    <button class="search-nav-btn" id="btn-search-next" title="查找下一个 (Enter)">›</button>
+    <button class="search-nav-btn" id="btn-search-close" title="关闭搜索 (Esc)">✕</button>
+  </div>
+
+  <!-- 主体工作区 -->
+  <main class="reader-workspace" id="workspace">
+    <!-- 空状态拖拽引导区 -->
+    <div class="empty-state" id="empty-state">
+      <div class="drop-zone" id="drop-zone">
+        <div class="drop-icon">📑</div>
+        <h2>拖拽 PDF 文件到此处，或点击上方“打开本地 PDF”</h2>
+        <p class="drop-subtitle">专为英语阅读、学术文献与六级考研阅读优化。选词即享<strong>有道释义浮窗</strong>、<strong>整句翻译</strong>与<strong>多色高亮标注</strong>！</p>
+        <button class="btn btn-primary" id="btn-open-empty">选择本地 PDF 文件</button>
+      </div>
+
+      <!-- 最近阅读书架 -->
+      <div class="recent-shelf" id="recent-shelf" style="display: none;">
+        <div class="recent-shelf-header">
+          <span class="shelf-title">📚 最近阅读记录</span>
+          <span class="shelf-subtitle">点击直接恢复阅读，无需每次前往资源管理器找文件</span>
+        </div>
+        <div class="recent-cards-grid" id="recent-cards-grid"></div>
+      </div>
+    </div>
+
+    <!-- PDF 页面渲染容器 -->
+    <div class="pdf-container" id="pdf-container" style="display: none;"></div>
+  </main>
+
+  <!-- 划选高亮快捷浮条 -->
+  <div class="highlight-popup" id="highlight-popup" style="display: none;">
+    <span class="hl-label">高亮:</span>
+    <button class="hl-color-btn color-yellow" data-color="yellow" title="高亮：荧光黄"></button>
+    <button class="hl-color-btn color-green" data-color="green" title="高亮：清新绿"></button>
+    <button class="hl-color-btn color-blue" data-color="blue" title="高亮：天水蓝"></button>
+    <button class="hl-color-btn color-pink" data-color="pink" title="高亮：樱花粉"></button>
+  </div>
+
+  <!-- 右侧标注抽屉 -->
+  <aside class="annotations-drawer" id="annotations-drawer">
+    <div class="drawer-header">
+      <div class="drawer-title-group">
+        <span class="drawer-title">📝 页面标注与大纲</span>
+        <span class="badge-count" id="drawer-count">0</span>
+      </div>
+      <button class="drawer-close-btn" id="drawer-close-btn" title="关闭抽屉">✕</button>
+    </div>
+    <div class="drawer-body" id="drawer-list">
+      <div class="drawer-empty-state">
+        <div class="empty-state-icon">📝</div>
+        <p>暂无页面标注内容</p>
+        <span>在 PDF 页面中使用手绘、方框或添加文本即可生成标注</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- 右侧全局生词与语句笔记本抽屉 -->
+  <aside class="annotations-drawer notebook-drawer" id="notebook-drawer">
+    <div class="drawer-header">
+      <div class="drawer-title-group">
+        <span class="drawer-title">📚 生词与语句笔记本</span>
+        <span class="badge-count" id="notebook-drawer-count">0</span>
+      </div>
+      <button class="drawer-close-btn" id="notebook-close-btn" title="关闭笔记本">✕</button>
+    </div>
+    <div class="drawer-toolbar">
+      <div class="drawer-search-wrapper">
+        <svg class="drawer-search-icon" viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+        <input type="text" id="notebook-search-input" placeholder="搜索已保存单词/释义..." autocomplete="off">
+      </div>
+      <div class="drawer-actions-group">
+        <button class="drawer-action-btn" id="btn-export-notes-md" title="导出为 Markdown (.md) 文件">📥 导出 .md</button>
+        <button class="drawer-action-btn" id="btn-export-notes-anki" title="导出为 Anki 牌组 (.tsv) 格式">📥 导出 Anki</button>
+        <button class="drawer-action-btn btn-danger-action" id="btn-clear-notes" title="清空全部笔记本内容">🗑️ 清空</button>
+      </div>
+    </div>
+    <div class="drawer-body" id="notebook-list">
+      <div class="drawer-empty-state">
+        <div class="empty-state-icon">📚</div>
+        <p>笔记本暂无词句</p>
+        <span>在 PDF 中选中单词或长句，点击上方【加笔记】或划词浮窗【存入笔记】即可收集</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- 左/右侧 PDF 目录大纲抽屉 (TOC) -->
+  <aside class="annotations-drawer outline-drawer" id="outline-drawer">
+    <div class="drawer-header">
+      <div class="drawer-title-group">
+        <span class="drawer-title">📑 PDF 目录大纲</span>
+        <span class="badge-count" id="drawer-outline-count">0</span>
+      </div>
+      <button class="drawer-close-btn" id="outline-close-btn" title="关闭目录">✕</button>
+    </div>
+    <div class="drawer-body" id="outline-list">
+      <div class="drawer-empty-state">
+        <div class="empty-state-icon">📑</div>
+        <p>未检测到文档目录</p>
+        <span>该 PDF 未内置大纲书签，可使用上方搜索或页码跳转</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- 高亮标注非阻塞轻量操作气泡 -->
+  <div class="highlight-action-popup" id="highlight-action-popup" style="display: none;">
+    <button type="button" class="hl-act-btn" id="hl-act-dict" title="查词 / 翻译释义">🔍 查词</button>
+    <button type="button" class="hl-act-btn" id="hl-act-copy" title="复制选中文字">📋 复制</button>
+    <button type="button" class="hl-act-btn hl-act-danger" id="hl-act-delete" title="删除该标注">🗑️ 删除</button>
+  </div>
+
+  <!-- PDF.js 核心库 -->
+  <script src="lib/pdfjs/pdf.min.js"></script>
+  <!-- 阅读器业务逻辑 -->
+  <script src="reader.js"></script>
+  <!-- 注入划词搜索与就地浮窗扩展 -->
+  <script src="content.js"></script>
+</body>
+</html>

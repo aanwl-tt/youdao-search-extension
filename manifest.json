@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "有道词典划词搜索",
+  "version": "1.6.0",
+  "description": "选中网页文字或长句整段，即时浮窗显示有道释义/翻译或一键跳转。支持全页面划词、右键菜单及内置本地高清 PDF 阅读器（视口虚拟懒加载、目录大纲、夜间护眼模式、多色高亮标注、最近阅读书架、秒级续读）。",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    },
+    "default_title": "有道词典划词搜索"
+  },
+  "permissions": [
+    "contextMenus",
+    "storage",
+    "unlimitedStorage"
+  ],
+  "host_permissions": [
+    "https://*.youdao.com/*",
+    "https://dict.youdao.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "all_frames": true,
+      "match_about_blank": true,
+      "run_at": "document_end"
+    }
+  ]
+}

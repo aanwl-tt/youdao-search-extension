@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>有道划词搜索</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <!-- Header -->
+    <header class="header">
+      <img src="icons/icon48.png" alt="icon" class="logo">
+      <div class="title-group">
+        <h1 class="title">有道划词搜索</h1>
+        <span class="badge">v1.6.0</span>
+      </div>
+    </header>
+
+    <!-- Quick Search Box -->
+    <div class="section search-section">
+      <form id="search-form" class="search-form">
+        <input 
+          type="text" 
+          id="search-input" 
+          placeholder="输入单词按回车快速查词..." 
+          autocomplete="off"
+          autofocus
+        />
+        <button type="submit" id="search-btn" title="查词">
+          <svg viewBox="0 0 24 24" class="search-icon">
+            <path d="M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+          </svg>
+        </button>
+      </form>
+    </div>
+
+    <!-- PDF Reader Entry -->
+    <div class="section pdf-section">
+      <button type="button" id="btn-open-reader" class="btn-pdf-reader">
+        <span class="pdf-icon">📖</span>
+        <div class="pdf-text">
+          <div class="pdf-title-row">
+            <span class="pdf-title">打开本地 PDF 翻译阅读器</span>
+            <span class="pdf-badge" id="popup-notes-count">📚 0 词</span>
+          </div>
+          <span class="pdf-desc">支持拖拽文献/六级 PDF，就地划词查释义与笔记</span>
+        </div>
+        <span class="pdf-arrow">›</span>
+      </button>
+    </div>
+
+    <!-- Feature Switches -->
+    <div class="section settings-section">
+      <div class="setting-item">
+        <div class="setting-info">
+          <span class="setting-title">划词悬浮按钮</span>
+          <span class="setting-desc">选中文本时光标旁显示查词小按钮</span>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="toggle-floating">
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="setting-item">
+        <div class="setting-info">
+          <span class="setting-title">点击浮标动作</span>
+          <span class="setting-desc">推荐“浮窗显示释义”</span>
+        </div>
+        <select id="select-click-action" class="select-dropdown">
+          <option value="popup">浮窗直接显示释义</option>
+          <option value="tab">打开有道网页</option>
+        </select>
+      </div>
+
+      <div class="setting-item">
+        <div class="setting-info">
+          <span class="setting-title">浮标弹出位置</span>
+          <span class="setting-desc">推荐“下方”以避开 Edge 菜单</span>
+        </div>
+        <select id="select-position" class="select-dropdown">
+          <option value="bottom">选区下方 (推荐)</option>
+          <option value="right">选区右侧</option>
+          <option value="top">选区上方</option>
+        </select>
+      </div>
+
+      <div class="setting-item">
+        <div class="setting-info">
+          <span class="setting-title">网页静默打开</span>
+          <span class="setting-desc">打开有道网页时不离开当前页面</span>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="toggle-background">
+          <span class="slider"></span>
+        </label>
+      </div>
+    </div>
+
+    <!-- Tip Card -->
+    <footer class="footer">
+      <p class="tip">✨ <strong>随时右键</strong>：右键菜单依然保留，随时右键直达有道网页详情！</p>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
