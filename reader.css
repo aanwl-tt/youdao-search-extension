@@ -731,23 +731,53 @@ body {
   border: 1px solid #e9d5ff;
 }
 
+.note-item-audio-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .note-item-audio-btn {
-  background: none;
-  border: none;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
   cursor: pointer;
   color: #4f46e5;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 2px 4px;
-  border-radius: 4px;
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
   transition: all 0.15s ease;
 }
 
 .note-item-audio-btn:hover {
   background: #eef2ff;
   color: #3730a3;
-  transform: scale(1.1);
+  border-color: #c7d2fe;
+  transform: scale(1.05);
+}
+
+.note-item-audio-btn.note-audio-uk {
+  color: #0369a1;
+  background: #f0f9ff;
+  border-color: #bae6fd;
+}
+
+.note-item-audio-btn.note-audio-uk:hover {
+  background: #e0f2fe;
+}
+
+.note-item-audio-btn.note-audio-us {
+  color: #b91c1c;
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+
+.note-item-audio-btn.note-audio-us:hover {
+  background: #fee2e2;
 }
 
 .note-item-audio-btn svg {

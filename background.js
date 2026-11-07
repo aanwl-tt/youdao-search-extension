@@ -94,7 +94,12 @@ async function queryYoudaoDefinition(word) {
     return { success: true, data: cached };
   }
 
-  const isSentence = cleanWord.length > 35 || /[.?!;:]\s|\n/.test(cleanWord) || (cleanWord.split(/\s+/).length >= 4);
+  // 放宽短语/多词搭配判定（4~6 词常用搭配优先尝试词典/短语库查询，避免直接被当成整句跳过四六级与权威词典释义）
+  const words = cleanWord.trim().split(/\s+/);
+  const wordCount = words.length;
+  const hasSentencePunctuation = /[.?!;:]\s|\n|[.?!;:]$/.test(cleanWord);
+  const isDirectSentence = cleanWord.length > 80 || hasSentencePunctuation || wordCount > 6;
+  const isSentence = isDirectSentence;
 
   const result = {
     word: cleanWord,
@@ -108,10 +113,11 @@ async function queryYoudaoDefinition(word) {
   };
 
   try {
-    // 若识别为长句/整段，直接优先调用机器翻译
-    if (isSentence) {
+    // 若识别为超长段落或带标点的完整整句，直接优先调用机器翻译
+    if (isDirectSentence) {
       const trans = await queryYoudaoTranslation(cleanWord);
       if (trans) {
+        result.isSentence = true;
         result.explains.push(trans);
         saveToDefinitionCache(cacheKey, result);
         return { success: true, data: result };

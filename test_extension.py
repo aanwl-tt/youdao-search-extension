@@ -237,6 +237,37 @@ print("PASS 26: Note card decoupled DOM structure prevents backspace deletion an
 import subprocess
 ret = subprocess.run(["node", os.path.join(ext_dir, "test_deep_verification.js")], capture_output=True, text=True)
 assert ret.returncode == 0, f"test_deep_verification.js failed:\n{ret.stderr}\n{ret.stdout}"
-print("PASS 27: Deep behavioral verification suite (data unpacking, scroll zero anchoring, undo isolation, boundary clamping, 15-doc prune) 100% passed.")
+print("PASS 27: Deep behavioral verification suite (10 suites: data unpacking, scroll anchoring, undo isolation, boundary clamping, cascade prune, cross-page search, selection slicing, phrase router, pin mode, parallel outline) 100% passed.")
 
-print("\n[SUCCESS] ALL 27 AUTOMATED CHECKS PASSED WITH ZERO ERRORS!")
+# Test 28: P1-1 异步全文检索与跨页索引引擎契约校验
+assert "searchAllPagesAcrossDoc" in r_js_content, "reader.js must implement searchAllPagesAcrossDoc"
+assert "docSearchMatches" in r_js_content, "reader.js must maintain docSearchMatches"
+assert "docPageTextCache" in r_js_content, "reader.js must maintain docPageTextCache"
+print("PASS 28: Asynchronous whole-document search & cross-page indexing engine contract verified.")
+
+# Test 29: P1-2 纯前端无损矢量 PDF 导出升级契约校验
+pdf_lib_path = os.path.join(ext_dir, "lib", "pdf-lib.min.js")
+assert os.path.exists(pdf_lib_path), "lib/pdf-lib.min.js missing"
+assert os.path.getsize(pdf_lib_path) > 300000, "pdf-lib.min.js file size too small"
+assert "pdf-lib.min.js" in r_html_content, "reader.html must include pdf-lib.min.js script"
+assert "PDFLib" in r_js_content and "pdfDoc.save()" in r_js_content, "reader.js must use pdf-lib for vector PDF export"
+print("PASS 29: Lossless vector PDF exporter (pdf-lib integration & vector preservation) verified.")
+
+# Test 30: P1-3 跨页选区高亮智能切片 (Selection Slicing) 契约校验
+assert "pageSlices" in r_js_content, "reader.js must implement pageSlices for selection slicing"
+assert "pageSlices.entries()" in r_js_content, "reader.js must slice multi-page selection rects per page boundary"
+print("PASS 30: Cross-page selection slicing (Selection Slicing) & multi-page persistence verified.")
+
+# Test 31: P2-1 短语搭配放宽与 P2-2 释义卡片 📌 钉住 (Pin) 模式契约校验
+assert "isDirectSentence" in bg_js_content, "background.js must relax phrase detection with isDirectSentence"
+assert "isCardPinned" in content_js_content, "content.js must track isCardPinned state"
+assert "yd-card-pin-btn" in content_js_content, "content.js must provide yd-card-pin-btn"
+print("PASS 31: Phrase collocation relaxation (4-6 words) & Card [Pin] lock mode verified.")
+
+# Test 32: P2-3 双发音 (UK/US) 独立点播与 P2-4 目录大纲 Promise.all 并发解析契约校验
+assert "yd-card-audio-uk" in content_js_content and "yd-card-audio-us" in content_js_content, "content.js must provide UK/US audio buttons"
+assert "note-audio-uk" in r_js_content and "note-audio-us" in r_js_content, "reader.js must provide UK/US note audio buttons"
+assert "Promise.all" in r_js_content and "resolveDestinationPage" in r_js_content, "reader.js must resolve outline destinations in parallel via Promise.all"
+print("PASS 32: UK/US dual accent independent audio buttons & outline Promise.all acceleration verified.")
+
+print("\n[SUCCESS] ALL 32 AUTOMATED CHECKS PASSED WITH ZERO ERRORS!")

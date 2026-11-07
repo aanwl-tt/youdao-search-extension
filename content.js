@@ -16,6 +16,7 @@
   let shadowRoot = null;
   let floatingBtn = null;
   let cardElement = null;
+  let isCardPinned = false;
   let currentAudio = null;
 
   // 1. 初始化并监听设置变更
@@ -211,20 +212,55 @@
           font-family: Arial, -apple-system, sans-serif;
           font-weight: 500;
         }
-        .yd-card-audio-btn {
-          background: none;
-          border: none;
-          cursor: pointer;
-          color: #e53935;
+        .yd-card-audio-group {
           display: inline-flex;
           align-items: center;
-          justify-content: center;
-          padding: 2px;
-          border-radius: 4px;
-          transition: background 0.15s;
+          gap: 4px;
+        }
+        .yd-card-audio-btn {
+          background: #fee2e2;
+          border: 1px solid #fca5a5;
+          cursor: pointer;
+          color: #dc2626;
+          display: inline-flex;
+          align-items: center;
+          gap: 2px;
+          font-size: 11px;
+          font-weight: 600;
+          padding: 1px 6px;
+          border-radius: 10px;
+          transition: all 0.15s ease;
+          line-height: 1.2;
         }
         .yd-card-audio-btn:hover {
-          background: #fee2e2;
+          background: #fecaca;
+          transform: scale(1.05);
+        }
+        .yd-card-actions-group {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+        }
+        .yd-card-pin-btn {
+          background: none;
+          border: none;
+          font-size: 13px;
+          line-height: 1;
+          color: #94a3b8;
+          cursor: pointer;
+          padding: 3px 5px;
+          border-radius: 4px;
+          transition: all 0.15s ease;
+        }
+        .yd-card-pin-btn:hover {
+          background: #e2e8f0;
+          color: #0f172a;
+        }
+        .yd-card-pin-btn.pinned {
+          background: #fef3c7;
+          color: #d97706;
+          border: 1px solid #fde68a;
+          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
         }
         .yd-card-close-btn {
           background: none;
@@ -375,6 +411,26 @@
             color: #f4f4f5;
             background: #27272a;
           }
+          .yd-card-pin-btn {
+            color: #71717a;
+          }
+          .yd-card-pin-btn:hover {
+            color: #f4f4f5;
+            background: #27272a;
+          }
+          .yd-card-pin-btn.pinned {
+            background: #78350f;
+            color: #fef3c7;
+            border-color: #b45309;
+          }
+          .yd-card-audio-btn {
+            background: #450a0a;
+            border-color: #7f1d1d;
+            color: #f87171;
+          }
+          .yd-card-audio-btn:hover {
+            background: #7f1d1d;
+          }
           .yd-card-body {
             color: #d4d4d8;
           }
@@ -411,13 +467,24 @@
             <span class="yd-card-word" id="yd-card-word"></span>
             <span class="yd-card-cet-tag" id="yd-card-cet-tag" style="display:none;"></span>
             <span class="yd-card-phonetic" id="yd-card-phonetic" style="display:none;"></span>
+            <div class="yd-card-audio-group" id="yd-card-audio-group" style="display:none;">
+              <button type="button" class="yd-card-audio-btn yd-card-audio-uk" id="yd-card-audio-uk" title="英音发音 🇬🇧">
+                <span>🇬🇧 英</span>
+              </button>
+              <button type="button" class="yd-card-audio-btn yd-card-audio-us" id="yd-card-audio-us" title="美音发音 🇺🇸">
+                <span>🇺🇸 美</span>
+              </button>
+            </div>
             <button type="button" class="yd-card-audio-btn" id="yd-card-audio-btn" style="display:none;" title="播放发音">
               <svg class="yd-icon" viewBox="0 0 24 24">
                 <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
               </svg>
             </button>
           </div>
-          <button type="button" class="yd-card-close-btn" id="yd-card-close-btn" title="关闭 (Esc)">✕</button>
+          <div class="yd-card-actions-group">
+            <button type="button" class="yd-card-pin-btn" id="yd-card-pin-btn" title="钉住卡片 (点击外部不关闭)">📌</button>
+            <button type="button" class="yd-card-close-btn" id="yd-card-close-btn" title="关闭 (Esc)">✕</button>
+          </div>
         </div>
         <div class="yd-card-body" id="yd-card-body"></div>
         <div class="yd-card-footer">
@@ -442,12 +509,24 @@
       handleButtonClick();
     });
 
-    // 绑定卡片关闭按钮
+    // 绑定卡片钉住按钮
+    const pinBtn = shadowRoot.getElementById("yd-card-pin-btn");
+    if (pinBtn) {
+      pinBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        isCardPinned = !isCardPinned;
+        pinBtn.classList.toggle("pinned", isCardPinned);
+        pinBtn.title = isCardPinned ? "取消钉住 (已锁定)" : "钉住卡片 (点击外部不关闭)";
+      });
+    }
+
+    // 绑定卡片关闭按钮 (强制关闭并重置钉住状态)
     const closeBtn = shadowRoot.getElementById("yd-card-close-btn");
     closeBtn.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
-      hideCard();
+      hideCard(true);
     });
 
     // 卡片内部点击不触发向外关闭
@@ -488,6 +567,9 @@
     const cetTagEl = shadowRoot.getElementById("yd-card-cet-tag");
     const phoneticEl = shadowRoot.getElementById("yd-card-phonetic");
     const audioBtn = shadowRoot.getElementById("yd-card-audio-btn");
+    const audioUkBtn = shadowRoot.getElementById("yd-card-audio-uk");
+    const audioUsBtn = shadowRoot.getElementById("yd-card-audio-us");
+    const audioGroupEl = shadowRoot.getElementById("yd-card-audio-group");
     const bodyEl = shadowRoot.getElementById("yd-card-body");
     const moreLink = shadowRoot.getElementById("yd-card-more-link");
     const noteBtn = shadowRoot.getElementById("yd-card-note-btn");
@@ -512,6 +594,9 @@
     phoneticEl.style.fontWeight = "";
     phoneticEl.style.fontSize = "";
     audioBtn.style.display = "none";
+    if (audioGroupEl) audioGroupEl.style.display = "none";
+    if (audioUkBtn) audioUkBtn.style.display = "none";
+    if (audioUsBtn) audioUsBtn.style.display = "none";
     moreLink.href = `https://dict.youdao.com/w/${encodeURIComponent(word)}`;
     bodyEl.innerHTML = `
       <div class="yd-card-loading">
@@ -572,13 +657,34 @@
           }
         }
 
-        // 渲染音标与发音
+        // 渲染音标与发音 (英音 🇬🇧 / 美音 🇺🇸 双发音独立点播)
         if (data.phonetic) {
           phoneticEl.textContent = data.phonetic;
           phoneticEl.style.display = "inline-block";
         }
 
-        if (data.audioUrl) {
+        const audioUkUrl = data.audioUrlUk || (data.audioUrl ? data.audioUrl.replace(/type=\d+/, "type=1") : "");
+        const audioUsUrl = data.audioUrlUs || (data.audioUrl ? data.audioUrl.replace(/type=\d+/, "type=2") : "");
+
+        if (audioGroupEl && (audioUkUrl || audioUsUrl)) {
+          audioGroupEl.style.display = "inline-flex";
+          if (audioUkBtn && audioUkUrl) {
+            audioUkBtn.style.display = "inline-flex";
+            audioUkBtn.onclick = (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              playAudio(audioUkUrl);
+            };
+          }
+          if (audioUsBtn && audioUsUrl) {
+            audioUsBtn.style.display = "inline-flex";
+            audioUsBtn.onclick = (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              playAudio(audioUsUrl);
+            };
+          }
+        } else if (data.audioUrl) {
           audioBtn.style.display = "inline-flex";
           audioBtn.onclick = (e) => {
             e.preventDefault();
@@ -816,13 +922,22 @@
     if (floatingBtn) floatingBtn.classList.remove("visible");
   }
 
-  function hideCard() {
-    if (cardElement) cardElement.classList.remove("visible");
+  function hideCard(force = false) {
+    if (isCardPinned && !force) return;
+    if (cardElement) {
+      cardElement.classList.remove("visible");
+      isCardPinned = false;
+      const pinBtn = shadowRoot?.getElementById("yd-card-pin-btn");
+      if (pinBtn) {
+        pinBtn.classList.remove("pinned");
+        pinBtn.title = "钉住卡片 (点击外部不关闭)";
+      }
+    }
   }
 
-  function hideAll() {
+  function hideAll(force = false) {
     hideButton();
-    hideCard();
+    hideCard(force);
   }
 
   function escapeHtml(str) {
@@ -943,22 +1058,22 @@
     }
   });
 
-  // 页面点击空白处隐藏浮标
+  // 页面点击空白处隐藏浮标与未锁定的释义卡片
   document.addEventListener("mousedown", (e) => {
     if (hostElement && e.composedPath && e.composedPath().includes(hostElement)) {
       return;
     }
     hideButton();
-    hideCard();
+    hideCard(false);
   }, true);
 
   // 页面滚动时隐藏浮标，但保留卡片（方便用户查看长文本）
   window.addEventListener("scroll", hideButton, { passive: true });
 
-  // 按 Esc 键关闭
+  // 按 Esc 键关闭 (强制全部关闭)
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
-      hideAll();
+      hideAll(true);
     }
   }, true);
 })();

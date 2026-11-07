@@ -34,6 +34,10 @@ let redoStack = [];
 // 全文搜索状态
 let searchMatches = [];
 let currentSearchIndex = -1;
+let docSearchMatches = [];
+let currentDocSearchIndex = -1;
+let docPageTextCache = new Map();
+let searchSessionId = 0;
 
 // 全局生词与语句笔记本
 let globalNotebook = [];
@@ -796,10 +800,16 @@ function toggleSearchBar(forceOpen = false) {
 function closeSearchBar() {
   if (!searchBar) return;
   searchBar.style.display = "none";
+  searchSessionId++;
   clearSearchHighlights();
   searchMatches = [];
+  docSearchMatches = [];
   currentSearchIndex = -1;
-  if (searchCount) searchCount.textContent = "0/0";
+  currentDocSearchIndex = -1;
+  if (searchCount) {
+    searchCount.textContent = "0/0";
+    searchCount.title = "";
+  }
 }
 
 function clearSearchHighlights() {
@@ -814,10 +824,15 @@ function clearSearchHighlights() {
 function performSearch(keyword) {
   clearSearchHighlights();
   searchMatches = [];
+  docSearchMatches = [];
   currentSearchIndex = -1;
+  currentDocSearchIndex = -1;
 
   if (!keyword || !keyword.trim()) {
-    if (searchCount) searchCount.textContent = "0/0";
+    if (searchCount) {
+      searchCount.textContent = "0/0";
+      searchCount.title = "";
+    }
     return;
   }
 
@@ -825,7 +840,7 @@ function performSearch(keyword) {
   const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const regex = new RegExp(`(${escaped})`, "gi");
 
-  // 遍历所有页面的文本层进行匹配与高亮标记
+  // 1. 同步高亮当前已挂载 DOM 的所有可见 TextLayer，提供 0ms 即时渲染反馈
   document.querySelectorAll(".textLayer").forEach((layer) => {
     layer.querySelectorAll("span").forEach((span) => {
       const text = span.textContent;
@@ -839,45 +854,153 @@ function performSearch(keyword) {
   });
 
   searchMatches = Array.from(document.querySelectorAll(".search-highlight"));
-  const total = searchMatches.length;
-
-  if (total > 0) {
+  if (searchMatches.length > 0) {
     currentSearchIndex = 0;
-    activateSearchMatch(0);
-  } else {
-    if (searchCount) searchCount.textContent = "0/0";
+    if (searchCount) {
+      searchCount.textContent = `1/${searchMatches.length}`;
+    }
+  }
+
+  // 2. 异步全书全文检索与跨页索引引擎（突破虚拟滚动/DOM 卸载壁垒）
+  if (currentPdfDoc) {
+    searchSessionId++;
+    const thisSession = searchSessionId;
+    searchAllPagesAcrossDoc(query, thisSession);
   }
 }
 
-function activateSearchMatch(index) {
-  if (index < 0 || index >= searchMatches.length) return;
-  searchMatches.forEach((m) => m.classList.remove("current"));
+// 异步跨页文本检索引擎：遍历 PDF.js 文本内容，构建全书命中索引
+async function searchAllPagesAcrossDoc(query, sessionId) {
+  if (searchCount) searchCount.textContent = "检索中...";
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const regex = new RegExp(escaped, "gi");
+  const allMatches = [];
 
-  const target = searchMatches[index];
-  target.classList.add("current");
-  target.scrollIntoView({ behavior: "smooth", block: "center" });
+  for (let p = 1; p <= totalPages; p++) {
+    if (searchSessionId !== sessionId) return;
 
-  const pageWrapper = target.closest(".pdf-page-wrapper");
-  if (pageWrapper && pageWrapper.dataset.pageNum) {
-    const pNum = parseInt(pageWrapper.dataset.pageNum, 10);
-    if (pageNumInput) pageNumInput.value = pNum;
+    let pageText = docPageTextCache.get(p);
+    if (pageText === undefined) {
+      try {
+        const page = await currentPdfDoc.getPage(p);
+        const tc = await page.getTextContent();
+        pageText = tc.items.map((it) => it.str).join(" ");
+        docPageTextCache.set(p, pageText);
+      } catch (e) {
+        pageText = "";
+      }
+    }
+
+    if (searchSessionId !== sessionId) return;
+
+    if (pageText) {
+      regex.lastIndex = 0;
+      let m;
+      let matchIdxOnPage = 0;
+      while ((m = regex.exec(pageText)) !== null) {
+        allMatches.push({
+          pageNum: p,
+          matchIndexOnPage: matchIdxOnPage++,
+          keyword: query
+        });
+        if (regex.lastIndex === m.index) regex.lastIndex++;
+      }
+    }
   }
 
-  if (searchCount) {
-    searchCount.textContent = `${index + 1}/${searchMatches.length}`;
+  if (searchSessionId !== sessionId) return;
+
+  docSearchMatches = allMatches;
+  const total = docSearchMatches.length;
+
+  if (total > 0) {
+    currentDocSearchIndex = 0;
+    currentSearchIndex = 0;
+    const hitPages = Array.from(new Set(docSearchMatches.map((m) => m.pageNum)));
+    if (searchCount) {
+      searchCount.textContent = `1/${total}`;
+      searchCount.title = `全书共命中 ${total} 处，分布在第 ${hitPages.slice(0, 10).join(", ")}${hitPages.length > 10 ? "..." : ""} 页`;
+    }
+    activateSearchMatch(0);
+  } else {
+    currentDocSearchIndex = -1;
+    currentSearchIndex = -1;
+    if (searchCount) {
+      searchCount.textContent = "0/0";
+      searchCount.title = "未找到匹配项";
+    }
+  }
+}
+
+async function activateSearchMatch(index) {
+  const total = docSearchMatches.length || searchMatches.length;
+  if (total === 0 || index < 0 || index >= total) return;
+
+  if (docSearchMatches.length > 0) {
+    currentDocSearchIndex = index;
+    currentSearchIndex = index;
+    const match = docSearchMatches[index];
+    const targetPage = match.pageNum;
+
+    // 若目标页面尚未被渲染（处于虚拟懒加载占位态），即时按需离屏渲染该页
+    const targetWrapper = pageWrappers[targetPage - 1];
+    if (targetWrapper) {
+      if (targetWrapper.dataset.rendered !== "true" && !targetWrapper.dataset.rendering) {
+        await renderSinglePage(targetPage, targetWrapper);
+      }
+      applySearchHighlightToPage(targetWrapper, match.keyword);
+
+      // 跨页定位至目标页
+      scrollToPage(targetPage);
+
+      // 高亮匹配项并平滑居中显示
+      document.querySelectorAll(".search-highlight.current").forEach((m) => m.classList.remove("current"));
+      const pageHls = targetWrapper.querySelectorAll(".search-highlight");
+      const targetEl = pageHls[match.matchIndexOnPage] || pageHls[0] || targetWrapper;
+      if (targetEl && targetEl.classList) {
+        targetEl.classList.add("current");
+        if (targetEl.scrollIntoView) {
+          targetEl.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+      }
+    }
+
+    if (searchCount) {
+      searchCount.textContent = `${index + 1}/${total}`;
+    }
+  } else if (searchMatches.length > 0) {
+    currentSearchIndex = index;
+    searchMatches.forEach((m) => m.classList.remove("current"));
+    const target = searchMatches[index];
+    target.classList.add("current");
+    target.scrollIntoView({ behavior: "smooth", block: "center" });
+
+    const pageWrapper = target.closest(".pdf-page-wrapper");
+    if (pageWrapper && pageWrapper.dataset.pageNum) {
+      const pNum = parseInt(pageWrapper.dataset.pageNum, 10);
+      if (pageNumInput) pageNumInput.value = pNum;
+    }
+
+    if (searchCount) {
+      searchCount.textContent = `${index + 1}/${searchMatches.length}`;
+    }
   }
 }
 
 function goToNextMatch() {
-  if (!searchMatches.length) return;
-  currentSearchIndex = (currentSearchIndex + 1) % searchMatches.length;
-  activateSearchMatch(currentSearchIndex);
+  const total = docSearchMatches.length || searchMatches.length;
+  if (!total) return;
+  const curr = docSearchMatches.length > 0 ? currentDocSearchIndex : currentSearchIndex;
+  const next = (curr + 1) % total;
+  activateSearchMatch(next);
 }
 
 function goToPrevMatch() {
-  if (!searchMatches.length) return;
-  currentSearchIndex = (currentSearchIndex - 1 + searchMatches.length) % searchMatches.length;
-  activateSearchMatch(currentSearchIndex);
+  const total = docSearchMatches.length || searchMatches.length;
+  if (!total) return;
+  const curr = docSearchMatches.length > 0 ? currentDocSearchIndex : currentSearchIndex;
+  const prev = (curr - 1 + total) % total;
+  activateSearchMatch(prev);
 }
 
 // -------------------------------------------------------------------------
@@ -1061,7 +1184,18 @@ async function resolveDestinationPage(dest) {
 }
 
 async function renderOutlineItems(items, container) {
-  for (const item of items) {
+  // 并发解析同级大纲项目的目标页码（避免多级大纲时的严格串行 for...of await）
+  const resolvedItems = await Promise.all(
+    items.map(async (item) => {
+      let pageNum = null;
+      try {
+        pageNum = await resolveDestinationPage(item.dest);
+      } catch (e) {}
+      return { item, pageNum };
+    })
+  );
+
+  for (const { item, pageNum } of resolvedItems) {
     const li = document.createElement("li");
     li.className = "outline-item";
 
@@ -1092,7 +1226,6 @@ async function renderOutlineItems(items, container) {
     titleSpan.title = item.title || "";
     row.appendChild(titleSpan);
 
-    const pageNum = await resolveDestinationPage(item.dest);
     if (pageNum) {
       const pageBadge = document.createElement("span");
       pageBadge.className = "outline-page";
@@ -1179,7 +1312,7 @@ function setTheme(theme, save = true) {
 }
 
 let currentAudio = null;
-function playAudio(word) {
+function playAudio(word, type = 2) {
   if (!word) return;
   try {
     if (currentAudio) {
@@ -1188,7 +1321,8 @@ function playAudio(word) {
     }
     const clean = word.replace(/[^\w\s-]/g, "").trim();
     if (!clean) return;
-    const url = `https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(clean)}&type=2`;
+    const audioType = (type === 1 || type === "1") ? 1 : 2;
+    const url = `https://dict.youdao.com/dictvoice?audio=${encodeURIComponent(clean)}&type=${audioType}`;
     currentAudio = new Audio(url);
     const p = currentAudio.play();
     if (p !== undefined) {
@@ -1235,9 +1369,10 @@ function renderNotebookUI(filterText = "") {
         : "";
       const isSingleWord = !wordText.includes(" ") || wordText.split(/\s+/).length <= 2;
       const audioBtn = isSingleWord
-        ? `<button type="button" class="note-item-audio-btn" data-word="${escapeHtml(wordText)}" title="播放发音">
-            <svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
-          </button>`
+        ? `<div class="note-item-audio-group">
+            <button type="button" class="note-item-audio-btn note-audio-uk" data-word="${escapeHtml(wordText)}" data-type="1" title="英音发音 🇬🇧 (UK)">🇬🇧 英</button>
+            <button type="button" class="note-item-audio-btn note-audio-us" data-word="${escapeHtml(wordText)}" data-type="2" title="美音发音 🇺🇸 (US)">🇺🇸 美</button>
+          </div>`
         : "";
 
       return `
@@ -1265,7 +1400,8 @@ function renderNotebookUI(filterText = "") {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       const word = btn.dataset.word;
-      if (word) playAudio(word);
+      const type = parseInt(btn.dataset.type, 10) || 2;
+      if (word) playAudio(word, type);
     });
   });
 
@@ -1921,6 +2057,11 @@ async function loadPdfData(arrayBuffer, fileName, docId, targetPage = 1) {
     } catch (e) {}
     currentPdfDoc = null;
   }
+
+  // 重置全文搜索与跨页索引缓存
+  docPageTextCache.clear();
+  docSearchMatches = [];
+  currentDocSearchIndex = -1;
 
   // 关键：保留完整的 ArrayBuffer，供后续保存导出使用
   currentDocBuffer = arrayBuffer.slice(0);
@@ -2999,16 +3140,18 @@ function checkAndShowHighlightPopup() {
   }
 
   const range = sel.getRangeAt(0);
-  const container = range.commonAncestorContainer;
-  const pageWrapper = container.nodeType === 1 ? container.closest(".pdf-page-wrapper") : container.parentElement?.closest(".pdf-page-wrapper");
-
-  if (!pageWrapper) {
+  const rect = range.getBoundingClientRect();
+  if (rect.width <= 0 && rect.height <= 0) {
     hideHighlightPopup();
     return;
   }
 
-  const rect = range.getBoundingClientRect();
-  if (rect.width <= 0 && rect.height <= 0) {
+  // 跨页容错：检测选区端点是否包含在有效 PDF 页面容器内
+  const startEl = range.startContainer.nodeType === 1 ? range.startContainer : range.startContainer.parentElement;
+  const endEl = range.endContainer.nodeType === 1 ? range.endContainer : range.endContainer.parentElement;
+  const pageWrapper = startEl?.closest(".pdf-page-wrapper") || endEl?.closest(".pdf-page-wrapper");
+
+  if (!pageWrapper) {
     hideHighlightPopup();
     return;
   }
@@ -3040,49 +3183,89 @@ async function applyHighlight(color) {
   if (!text) return;
 
   const range = sel.getRangeAt(0);
-  const startEl = range.startContainer.parentElement;
-  const pageWrapper = startEl?.closest(".pdf-page-wrapper");
-  if (!pageWrapper) return;
-
-  const pageNum = parseInt(pageWrapper.dataset.pageNum, 10);
-  const wrapperRect = pageWrapper.getBoundingClientRect();
-
   const clientRects = Array.from(range.getClientRects());
   if (!clientRects.length) return;
 
-  const rectsPct = clientRects
-    .map((r) => {
-      const leftPct = Math.max(0, ((r.left - wrapperRect.left) / wrapperRect.width) * 100);
-      const topPct = Math.max(0, ((r.top - wrapperRect.top) / wrapperRect.height) * 100);
-      const widthPct = Math.min(100, (r.width / wrapperRect.width) * 100);
-      const heightPct = Math.min(100, (r.height / wrapperRect.height) * 100);
-      return {
-        leftPct: Math.round(leftPct * 100) / 100,
-        topPct: Math.round(topPct * 100) / 100,
-        widthPct: Math.round(widthPct * 100) / 100,
-        heightPct: Math.round(heightPct * 100) / 100
-      };
-    })
-    .filter((r) => r.widthPct > 0.5 && r.heightPct > 0.5);
+  // 跨页选区高亮智能切片 (Selection Slicing，将跨越页面边界的 Range 矩形根据页面边界分割为各页独立标注并持久化)
+  const wrappers = Array.from(document.querySelectorAll(".pdf-page-wrapper"));
+  if (!wrappers.length) return;
 
-  const newAnn = {
-    id: "ann_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6),
-    type: "highlight",
-    pdfKey: currentDocKey,
-    pageNum: pageNum,
-    text: text,
-    color: color,
-    rects: rectsPct,
-    createdAt: Date.now()
-  };
+  // 收集并切片归类属于不同页面的 Range 矩形
+  const pageSlices = new Map(); // pageNum -> { wrapper, rects: [] }
 
-  currentAnnotations.push(newAnn);
-  await dbSaveAnnotation(newAnn);
-  recordUndoAction({ type: "add", item: newAnn });
+  for (const r of clientRects) {
+    if (r.width <= 1 || r.height <= 1) continue;
+    const midY = r.top + r.height / 2;
+    const midX = r.left + r.width / 2;
 
-  const hlLayer = pageWrapper.querySelector(".highlight-layer");
-  if (hlLayer) {
-    renderPageHighlights(pageNum, hlLayer);
+    let targetWrapper = null;
+    for (const w of wrappers) {
+      const b = w.getBoundingClientRect();
+      if (midY >= b.top && midY <= b.bottom && midX >= b.left && midX <= b.right) {
+        targetWrapper = w;
+        break;
+      }
+    }
+
+    if (!targetWrapper) {
+      for (const w of wrappers) {
+        const b = w.getBoundingClientRect();
+        if (r.top < b.bottom && r.bottom > b.top) {
+          targetWrapper = w;
+          break;
+        }
+      }
+    }
+
+    if (targetWrapper && targetWrapper.dataset.pageNum) {
+      const pNum = parseInt(targetWrapper.dataset.pageNum, 10);
+      if (!pageSlices.has(pNum)) {
+        pageSlices.set(pNum, { wrapper: targetWrapper, rects: [] });
+      }
+      pageSlices.get(pNum).rects.push(r);
+    }
+  }
+
+  if (pageSlices.size === 0) return;
+
+  for (const [pageNum, slice] of pageSlices.entries()) {
+    const wrapperRect = slice.wrapper.getBoundingClientRect();
+    const rectsPct = slice.rects
+      .map((r) => {
+        const leftPct = Math.max(0, ((r.left - wrapperRect.left) / wrapperRect.width) * 100);
+        const topPct = Math.max(0, ((r.top - wrapperRect.top) / wrapperRect.height) * 100);
+        const widthPct = Math.min(100, (r.width / wrapperRect.width) * 100);
+        const heightPct = Math.min(100, (r.height / wrapperRect.height) * 100);
+        return {
+          leftPct: Math.round(leftPct * 100) / 100,
+          topPct: Math.round(topPct * 100) / 100,
+          widthPct: Math.round(widthPct * 100) / 100,
+          heightPct: Math.round(heightPct * 100) / 100
+        };
+      })
+      .filter((r) => r.widthPct > 0.5 && r.heightPct > 0.5);
+
+    if (rectsPct.length === 0) continue;
+
+    const newAnn = {
+      id: "ann_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6) + "_p" + pageNum,
+      type: "highlight",
+      pdfKey: currentDocKey,
+      pageNum: pageNum,
+      text: text,
+      color: color,
+      rects: rectsPct,
+      createdAt: Date.now()
+    };
+
+    currentAnnotations.push(newAnn);
+    await dbSaveAnnotation(newAnn);
+    recordUndoAction({ type: "add", item: newAnn });
+
+    const hlLayer = slice.wrapper.querySelector(".highlight-layer");
+    if (hlLayer) {
+      renderPageHighlights(pageNum, hlLayer);
+    }
   }
 
   updateAnnotationsUI();
@@ -3191,6 +3374,26 @@ function updateAnnotationsUI() {
 // =========================================================================
 // 10. 保存与导出已标注文档 (PDF 另存为 / 打印 / 自动落盘)
 // =========================================================================
+function parseColorRgba(colorStr) {
+  if (!colorStr) return { r: 1.0, g: 0.92, b: 0.23, a: 0.35 };
+  if (colorStr === "yellow") return { r: 1.0, g: 0.92, b: 0.23, a: 0.35 };
+  if (colorStr === "green") return { r: 0.40, g: 0.88, b: 0.40, a: 0.35 };
+  if (colorStr === "blue") return { r: 0.38, g: 0.70, b: 1.0, a: 0.35 };
+  if (colorStr === "pink") return { r: 1.0, g: 0.46, b: 0.65, a: 0.35 };
+  if (colorStr.startsWith("#")) {
+    const hex = colorStr.replace("#", "");
+    if (hex.length === 6) {
+      return {
+        r: parseInt(hex.slice(0, 2), 16) / 255,
+        g: parseInt(hex.slice(2, 4), 16) / 255,
+        b: parseInt(hex.slice(4, 6), 16) / 255,
+        a: 0.35
+      };
+    }
+  }
+  return { r: 1.0, g: 0.92, b: 0.23, a: 0.35 };
+}
+
 async function exportAnnotatedPdf() {
   if (!currentPdfDoc || !pageWrappers.length) {
     alert("请先打开一份 PDF 文档！");
@@ -3199,6 +3402,137 @@ async function exportAnnotatedPdf() {
 
   showToast("正在合并渲染并生成已标注文档...");
 
+  // 纯前端无损矢量 PDF 导出升级 (基于 pdf-lib，保留原 PDF 矢量文字、目录大纲与高清晰度)
+  if (typeof PDFLib !== "undefined" && currentDocBuffer) {
+    try {
+      showToast("正在通过 pdf-lib 生成无损矢量标注文档...");
+      const { PDFDocument, rgb } = window.PDFLib;
+      const pdfDoc = await PDFDocument.load(currentDocBuffer.slice(0));
+      const pages = pdfDoc.getPages();
+
+      for (let i = 0; i < pages.length; i++) {
+        const page = pages[i];
+        const pageNum = i + 1;
+        const { width: pWidth, height: pHeight } = page.getSize();
+
+        // 1. 原生矢量高亮批注 (保留原 PDF 矢量文字、目录大纲与高清晰度)
+        const pageHls = currentAnnotations.filter((a) => a.pageNum === pageNum && (!a.type || a.type === "highlight"));
+        for (const ann of pageHls) {
+          if (!ann.rects || !ann.rects.length) continue;
+          const c = parseColorRgba(ann.color);
+          for (const r of ann.rects) {
+            const rx = (r.leftPct / 100) * pWidth;
+            const rw = (r.widthPct / 100) * pWidth;
+            const rh = (r.heightPct / 100) * pHeight;
+            const ry = pHeight - ((r.topPct + r.heightPct) / 100) * pHeight;
+            page.drawRectangle({
+              x: rx,
+              y: ry,
+              width: rw,
+              height: rh,
+              color: rgb(c.r, c.g, c.b),
+              opacity: c.a !== undefined ? c.a : 0.35
+            });
+          }
+        }
+
+        // 2. 手绘墨水笔迹与便签文本图层 (以高分辨率透明矢量图层叠加，不破坏底层原文本与字体)
+        const pageDraws = currentAnnotations.filter((a) => a.pageNum === pageNum && (a.type === "stroke" || a.type === "rect"));
+        const pageTbs = currentAnnotations.filter((a) => a.pageNum === pageNum && a.type === "text_box");
+
+        if (pageDraws.length > 0 || pageTbs.length > 0) {
+          const overlayCanvas = document.createElement("canvas");
+          const dpr = 2.0; // 2x 超采样保证墨水与文字高清
+          overlayCanvas.width = Math.round(pWidth * dpr);
+          overlayCanvas.height = Math.round(pHeight * dpr);
+          const oCtx = overlayCanvas.getContext("2d");
+          oCtx.imageSmoothingEnabled = true;
+          oCtx.imageSmoothingQuality = "high";
+
+          // 绘制方框
+          pageDraws.filter((a) => a.type === "rect").forEach((r) => {
+            oCtx.save();
+            oCtx.strokeStyle = r.color || "#e61b1b";
+            oCtx.lineWidth = (r.width || 2) * dpr;
+            const x = (r.xPct / 100) * overlayCanvas.width;
+            const y = (r.yPct / 100) * overlayCanvas.height;
+            const w = (r.wPct / 100) * overlayCanvas.width;
+            const h = (r.hPct / 100) * overlayCanvas.height;
+            oCtx.strokeRect(x, y, w, h);
+            oCtx.restore();
+          });
+
+          // 绘制贝塞尔曲线墨水手绘
+          pageDraws.filter((a) => a.type === "stroke").forEach((str) => {
+            if (!str.points || !str.points.length) return;
+            drawSmoothStroke(
+              oCtx,
+              str.points,
+              overlayCanvas.width,
+              overlayCanvas.height,
+              str.color,
+              (str.width || 2) * dpr,
+              str.isHighlighter
+            );
+          });
+
+          // 绘制便签卡片与文字
+          pageTbs.forEach((tb) => {
+            if (!tb.text) return;
+            const tx = (tb.xPct / 100) * overlayCanvas.width;
+            const ty = (tb.yPct / 100) * overlayCanvas.height;
+            const lines = tb.text.split("\n");
+            const fontSize = Math.round(13 * dpr);
+            const lineH = Math.round(18 * dpr);
+            oCtx.save();
+            oCtx.font = `bold ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+            const maxW = Math.max(...lines.map((l) => oCtx.measureText(l).width)) + 16 * dpr;
+            const totalH = lines.length * lineH + 12 * dpr;
+
+            oCtx.fillStyle = "rgba(255, 255, 255, 0.95)";
+            oCtx.strokeStyle = "#e53935";
+            oCtx.lineWidth = 1.5 * dpr;
+            oCtx.fillRect(tx, ty, maxW, totalH);
+            oCtx.strokeRect(tx, ty, maxW, totalH);
+
+            oCtx.fillStyle = "#1a1a1a";
+            lines.forEach((line, idx) => {
+              oCtx.fillText(line, tx + 8 * dpr, ty + (idx + 1) * lineH - 2 * dpr);
+            });
+            oCtx.restore();
+          });
+
+          const pngDataUrl = overlayCanvas.toDataURL("image/png");
+          const embeddedOverlay = await pdfDoc.embedPng(pngDataUrl);
+          page.drawImage(embeddedOverlay, {
+            x: 0,
+            y: 0,
+            width: pWidth,
+            height: pHeight
+          });
+        }
+      }
+
+      const pdfBytes = await pdfDoc.save();
+      const pdfBlob = new Blob([pdfBytes], { type: "application/pdf" });
+      const downloadUrl = URL.createObjectURL(pdfBlob);
+      const a = document.createElement("a");
+      const saveName = (currentDocName || "document").replace(/\.pdf$/i, "") + "_已标注文档.pdf";
+      a.href = downloadUrl;
+      a.download = saveName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(downloadUrl), 5000);
+
+      showToast(`✅ 无损矢量 PDF 导出成功：${saveName}`);
+      return;
+    } catch (vectorErr) {
+      console.warn("pdf-lib vector export failed, falling back to raster exporter:", vectorErr);
+    }
+  }
+
+  // 降级兜底方案：光栅图合成导出
   try {
     const pageImages = [];
 
@@ -3207,10 +3541,7 @@ async function exportAnnotatedPdf() {
       const pageNum = i + 1;
       let pdfCanvas = wrapper.querySelector(".pdf-canvas");
       let drawCanvas = wrapper.querySelector(".draw-canvas");
-      const hlLayer = wrapper.querySelector(".highlight-layer");
-      const tbLayer = wrapper.querySelector(".text-annotation-layer");
 
-      // 若页面因视口懒加载未被渲染，离屏按需渲染该页
       if (!pdfCanvas) {
         await renderSinglePage(pageNum, wrapper);
         pdfCanvas = wrapper.querySelector(".pdf-canvas");
@@ -3219,16 +3550,13 @@ async function exportAnnotatedPdf() {
 
       if (!pdfCanvas) continue;
 
-      // 创建高保真离屏合成画布
       const mergeCanvas = document.createElement("canvas");
       mergeCanvas.width = pdfCanvas.width;
       mergeCanvas.height = pdfCanvas.height;
       const mCtx = mergeCanvas.getContext("2d");
 
-      // 1. 绘制底层 PDF
       mCtx.drawImage(pdfCanvas, 0, 0);
 
-      // 2. 绘制高亮矩形 (将 HTML 矩形渲染至画布)
       const pageHls = currentAnnotations.filter((a) => a.pageNum === pageNum && (!a.type || a.type === "highlight"));
       pageHls.forEach((ann) => {
         if (!ann.rects) return;
@@ -3245,12 +3573,10 @@ async function exportAnnotatedPdf() {
         mCtx.restore();
       });
 
-      // 3. 绘制手写线条图层
       if (drawCanvas) {
         mCtx.drawImage(drawCanvas, 0, 0);
       }
 
-      // 4. 绘制文字笔记
       const pageTbs = currentAnnotations.filter((a) => a.pageNum === pageNum && a.type === "text_box");
       if (pageTbs.length > 0) {
         mCtx.save();
@@ -3259,7 +3585,6 @@ async function exportAnnotatedPdf() {
           if (!tb.text) return;
           const tx = (tb.xPct / 100) * mergeCanvas.width;
           const ty = (tb.yPct / 100) * mergeCanvas.height;
-          // 绘制便签背景与文字
           const lines = tb.text.split("\n");
           const lineH = Math.round(18 * (mergeCanvas.width / 800));
           const maxW = Math.max(...lines.map((l) => mCtx.measureText(l).width)) + 16;
@@ -3281,13 +3606,12 @@ async function exportAnnotatedPdf() {
 
       const dataUrl = mergeCanvas.toDataURL("image/jpeg", 0.92);
       pageImages.push({
-        width: Math.round(pdfCanvas.width * 0.75), // 转换至 72dpi PDF 点坐标
+        width: Math.round(pdfCanvas.width * 0.75),
         height: Math.round(pdfCanvas.height * 0.75),
         dataUrl: dataUrl
       });
     }
 
-    // 生成标准 PDF 1.4 并触发浏览器下载
     const pdfBlob = generatePdfBlobFromImages(pageImages);
     const downloadUrl = URL.createObjectURL(pdfBlob);
     const a = document.createElement("a");
