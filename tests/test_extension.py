@@ -2,7 +2,8 @@ import json
 import os
 from PIL import Image
 
-ext_dir = r"e:\AIagents\杂事\youdao-search-extension"
+tests_dir = os.path.dirname(os.path.abspath(__file__))
+ext_dir = os.path.dirname(tests_dir)
 print("=== Running Automated Bug & Quality Audit (v1.1) ===")
 
 # Test 1: Manifest validation
@@ -235,7 +236,7 @@ print("PASS 26: Note card decoupled DOM structure prevents backspace deletion an
 
 # Test 27: Execute deep runtime behavioral verification suite
 import subprocess
-ret = subprocess.run(["node", os.path.join(ext_dir, "test_deep_verification.js")], capture_output=True, text=True)
+ret = subprocess.run(["node", os.path.join(tests_dir, "test_deep_verification.js")], capture_output=True, text=True, cwd=ext_dir)
 assert ret.returncode == 0, f"test_deep_verification.js failed:\n{ret.stderr}\n{ret.stdout}"
 print("PASS 27: Deep behavioral verification suite (12 suites: data unpacking, scroll anchoring, undo isolation, boundary clamping, cascade prune, cross-page search, selection slicing, phrase router, pin mode, parallel outline, batch undo/redo, count preservation) 100% passed.")
 
